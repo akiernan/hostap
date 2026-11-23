@@ -636,6 +636,8 @@ CONFIG_BGSCAN_SIMPLE=y
 # Learn channels used by the network and try to avoid bgscans on other
 # channels (experimental)
 #CONFIG_BGSCAN_LEARN=y
+# Scan only while the signal is below the threshold, backing off between scans
+#CONFIG_BGSCAN_QUIET=y
 
 # Opportunistic Wireless Encryption (OWE)
 # Experimental implementation of draft-harkins-owe-07.txt
