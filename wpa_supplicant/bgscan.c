@@ -21,6 +21,9 @@ static const struct bgscan_ops * bgscan_modules[] = {
 #ifdef CONFIG_BGSCAN_LEARN
 	&bgscan_learn_ops,
 #endif /* CONFIG_BGSCAN_LEARN */
+#ifdef CONFIG_BGSCAN_QUIET
+	&bgscan_quiet_ops,
+#endif /* CONFIG_BGSCAN_QUIET */
 	NULL
 };
 

@@ -340,3 +340,105 @@ def test_bgscan_reconfig(dev, apdev):
     dev[0].set_network_quoted(id, "bgscan", "simple:1:-45:2")
     dev[0].set_network_quoted(id, "bgscan", "learn:1:-20:2")
     dev[0].set_network_quoted(id, "bgscan", "")
+
+def test_bgscan_quiet_good_signal(dev, apdev):
+    """bgscan_quiet does not scan while the signal is good"""
+    hapd = hostapd.add_ap(apdev[0], {"ssid": "bgscan"})
+
+    dev[0].connect("bgscan", key_mgmt="NONE", scan_freq="2412",
+                   bgscan="quiet:1:-80:2")
+    ev = dev[0].wait_event(["CTRL-EVENT-SCAN-STARTED"], timeout=5)
+    if ev is not None:
+        raise Exception("Unexpected scan with a good signal")
+
+def test_bgscan_quiet_weak_signal(dev, apdev):
+    """bgscan_quiet scans with back-off while the signal is weak"""
+    hapd = hostapd.add_ap(apdev[0], {"ssid": "bgscan"})
+
+    dev[0].connect("bgscan", key_mgmt="NONE", scan_freq="2412",
+                   bgscan="quiet:1:-20:4")
+    ev = dev[0].wait_event(["CTRL-EVENT-SIGNAL-CHANGE"], timeout=10)
+    if ev is None:
+        raise Exception("No signal change event")
+    if "above=0" not in ev:
+        raise Exception("Unexpected signal change event contents: " + ev)
+
+    # Intervals 1, 2, 4, 4 s
+    started = []
+    for i in range(4):
+        ev = dev[0].wait_event(["CTRL-EVENT-SCAN-STARTED"], timeout=10)
+        if ev is None:
+            raise Exception("Scanning not continued")
+        started.append(time.time())
+        ev = dev[0].wait_event(["CTRL-EVENT-SCAN-RESULTS"], timeout=5)
+        if ev is None:
+            raise Exception("Scan did not complete")
+    gaps = [b - a for a, b in zip(started, started[1:])]
+    logger.info("Scan gaps: " + str(gaps))
+    if gaps[0] < 1.5 or gaps[1] < 3.5 or gaps[2] < 3.5 or gaps[2] > 6:
+        raise Exception("Unexpected back-off: " + str(gaps))
+
+def test_bgscan_quiet_invalid_params(dev, apdev):
+    """bgscan_quiet refuses invalid parameters"""
+    hapd = hostapd.add_ap(apdev[0], {"ssid": "bgscan"})
+
+    for p in ["quiet", "quiet:1", "quiet:1:-20", "quiet:1:-20:4:5",
+              "quiet:0:-20:4", "quiet:1:-20:0", "quiet:4:-20:1",
+              "quiet:1:0:4", "quiet:1:10:4", "quiet:x:-20:4",
+              "quiet:1:-20:4x"]:
+        dev[0].connect("bgscan", key_mgmt="NONE", scan_freq="2412",
+                       bgscan=p)
+        ev = dev[0].wait_event(["CTRL-EVENT-SCAN-STARTED"], timeout=1.5)
+        if ev is not None:
+            raise Exception("bgscan started with invalid parameters " + p)
+        dev[0].request("REMOVE_NETWORK all")
+        dev[0].wait_disconnected()
+
+def test_bgscan_quiet_beacon_loss(dev, apdev):
+    """bgscan_quiet and beacon loss"""
+    params = hostapd.wpa2_params(ssid="bgscan", passphrase="12345678")
+    params["wpa_key_mgmt"] = "WPA-PSK-SHA256"
+    params["ieee80211w"] = "2"
+    hapd = hostapd.add_ap(apdev[0], params)
+
+    dev[0].set("disable_sa_query", "1")
+    dev[0].connect("bgscan", ieee80211w="2", key_mgmt="WPA-PSK-SHA256",
+                   psk="12345678", scan_freq="2412",
+                   bgscan="quiet:1:-80:2")
+    ev = dev[0].wait_event(["CTRL-EVENT-SIGNAL-CHANGE"], timeout=10)
+    if ev is None:
+        raise Exception("No signal change event")
+    hapd.set("ext_mgmt_frame_handling", "1")
+    if "OK" not in hapd.request("STOP_AP"):
+        raise Exception("Failed to stop AP")
+    hapd.disable()
+    hapd.set("ssid", "foo")
+    hapd.set("beacon_int", "10000")
+    hapd.enable()
+    ev = dev[0].wait_event(["CTRL-EVENT-BEACON-LOSS"], timeout=10)
+    if ev is None:
+        raise Exception("Beacon loss not reported")
+    ev = dev[0].wait_event(["CTRL-EVENT-SCAN-STARTED"], timeout=5)
+    if ev is None:
+        raise Exception("No scan after beacon loss")
+
+def test_bgscan_quiet_scan_failure(dev, apdev):
+    """bgscan_quiet and scan failure"""
+    hapd = hostapd.add_ap(apdev[0], {"ssid": "bgscan"})
+
+    dev[0].connect("bgscan", key_mgmt="NONE", scan_freq="2412",
+                   bgscan="quiet:1:-20:2")
+    with alloc_fail(dev[0], 1,
+                    "wpa_supplicant_trigger_scan;bgscan_quiet_timeout"):
+        wait_fail_trigger(dev[0], "GET_ALLOC_FAIL")
+    ev = dev[0].wait_event(["CTRL-EVENT-SCAN-RESULTS"], 10)
+    if ev is None:
+        raise Exception("Scanning not continued after failure")
+
+def test_bgscan_quiet_oom(dev, apdev):
+    """bgscan_quiet OOM"""
+    hapd = hostapd.add_ap(apdev[0], {"ssid": "bgscan"})
+
+    with alloc_fail(dev[0], 1, "bgscan_quiet_init"):
+        dev[0].connect("bgscan", key_mgmt="NONE", scan_freq="2412",
+                       bgscan="quiet:1:-20:2")
